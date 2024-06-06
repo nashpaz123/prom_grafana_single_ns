@@ -8,14 +8,19 @@ This guide walks you through installing Prometheus and Grafana on a Kubernetes c
 
 ## Prerequisites
 
-1. **Kubernetes Cluster**: Ensure you have a running Kubernetes cluster.
-2. **Helm**: Ensure Helm is installed and configured to use your Kubernetes cluster.
+Kubernetes cluster.
+2. **Helm**: 
 
-## Step-by-Step Guide
+```sh
+wget https://get.helm.sh/helm-v3.14.4-linux-amd64.tar.gz
+ tar -zxvf helm-v3.14.4-linux-amd64.tar.gz
+ sudo mv linux-amd64/helm /usr/local/bin/helm
+
+alias k=kubectl
+alias kk="kubectl -n target-namespace"
+```
 
 ### Step 1: Add Helm Repositories
-
-First, add the Prometheus and Grafana Helm chart repositories:
 
 ```sh
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
@@ -23,100 +28,228 @@ helm repo add grafana https://grafana.github.io/helm-charts
 helm repo update
 ```
 
-### Step 2: Create a Namespace
-
-Create a namespace for monitoring tools:
+### Step 2: Create a Namespace if it doesnt exist
 
 ```sh
 kubectl create namespace monitoring
 ```
 
-### Step 3: Install Prometheus Operator
+### Step 3: Install Prometheus Operator in the ns #TODO: check if can have extra monitoring ns for each ns
+Certainly! You can automate the configuration of Grafana and the addition of Prometheus as a data source using configuration files and Kubernetes resources. Here’s how you can achieve this.
 
-Use Helm to install Prometheus Operator in the `monitoring` namespace:
+### Step 7: Configure Prometheus as a Data Source in Grafana (Automated)
 
-```sh
-helm install prometheus-operator prometheus-community/kube-prometheus-stack --namespace monitoring
-```
+You can use a ConfigMap to automate the configuration of Prometheus as a data source in Grafana.
 
-### Step 4: Create a Namespace to Monitor
-
-Create the namespace you want to monitor (if it doesn't exist already):
-
-```sh
-kubectl create namespace target-namespace
-```
-
-### Step 5: Create a ServiceMonitor
-
-A `ServiceMonitor` custom resource specifies how Prometheus should monitor services within a namespace. Here’s an example `ServiceMonitor` YAML file:
+Create a file named `grafana-datasource.yaml` with the following content:
 
 ```yaml
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
+apiVersion: v1
+kind: ConfigMap
 metadata:
-  name: target-namespace-servicemonitor
-  namespace: monitoring
+  name: grafana-datasources
+  namespace: target-namespace
+  labels:
+    grafana_datasource: "1"
+data:
+  prometheus-datasource.yaml: |
+    apiVersion: 1
+    datasources:
+    - name: Prometheus
+      type: prometheus
+      access: proxy
+      url: http://prometheus-operated.target-namespace.svc.cluster.local:9090
+      isDefault: true
+      editable: true
+```
+
+Apply the ConfigMap to your Kubernetes cluster:
+
+```sh
+kubectl apply -f grafana-datasource.yaml
+```
+
+This ConfigMap will automatically configure Grafana to use Prometheus as a data source.
+
+### Step 8: Create Dashboards (Automated)
+
+You can create Grafana dashboards by using ConfigMaps or JSON files and apply them to Grafana.
+
+Create a file named `grafana-dashboard-configmap.yaml` with the following content:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards
+  namespace: target-namespace
+  labels:
+    grafana_dashboard: "1"
+data:
+  sample-dashboard.json: |
+    {
+      "annotations": {
+        "list": [
+          {
+            "builtIn": 1,
+            "datasource": "-- Grafana --",
+            "enable": true,
+            "hide": true,
+            "iconColor": "rgba(0, 211, 255, 1)",
+            "name": "Annotations & Alerts",
+            "type": "dashboard"
+          }
+        ]
+      },
+      "editable": true,
+      "gnetId": null,
+      "graphTooltip": 0,
+      "id": null,
+      "links": [],
+      "panels": [
+        {
+          "datasource": "prometheus",
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "mappings": [],
+              "units": "percent"
+            }
+          },
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 0,
+            "y": 0
+          },
+          "id": 2,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "mean"
+              ],
+              "fields": "",
+              "values": false
+            }
+          },
+          "targets": [
+            {
+              "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"target-namespace\"}[5m])) by (pod)",
+              "interval": "",
+              "legendFormat": "{{pod}}",
+              "refId": "A"
+            }
+          ],
+          "title": "CPU Usage",
+          "type": "stat"
+        }
+      ],
+      "schemaVersion": 27,
+      "style": "dark",
+      "tags": [],
+      "templating": {
+        "list": []
+      },
+      "time": {
+        "from": "now-6h",
+        "to": "now"
+      },
+      "timepicker": {
+        "refresh_intervals": [
+          "5s",
+          "10s",
+          "30s",
+          "1m",
+          "5m",
+          "15m",
+          "30m",
+          "1h",
+          "2h",
+          "1d"
+        ],
+        "time_options": [
+          "5m",
+          "15m",
+          "1h",
+          "6h",
+          "12h",
+          "24h",
+          "2d",
+          "7d",
+          "30d"
+        ]
+      },
+      "timezone": "",
+      "title": "pod Dashboard",
+      "uid": null,
+      "version": 1
+    }
+```
+
+Apply the ConfigMap to your Kubernetes cluster:
+
+```sh
+kubectl apply -f grafana-dashboard-configmap.yaml
+```
+
+### Applying the Configuration
+
+1. Ensure the Grafana deployment picks up the ConfigMap. The Grafana Helm chart usually has options to specify the data source and dashboard directories. Update the Helm release to include these ConfigMaps:
+
+```sh
+helm upgrade grafana grafana/grafana \
+  --namespace target-namespace \
+  --set datasources.enabled=true \
+  --set datasources.configMapName=grafana-datasources \
+  --set dashboards.enabled=true \
+  --set dashboards.configMapName=grafana-dashboards
+```
+
+### nodeport for the damned vmdev
+```
+#nodeport-grafana.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana  # Service name
+  namespace: target-namespace  # Target namespace
 spec:
+  type: NodePort
   selector:
-    matchLabels:
-      monitor: 'true'
-  namespaceSelector:
-    matchNames:
-      - target-namespace
-  endpoints:
-    - port: web
-      interval: 30s
-      scrapeTimeout: 10s
+    app.kubernetes.io/name: grafana # Target pods with label app.kubernetes.io/name=grafana
+  ports:
+  - protocol: TCP
+    port: 80  # External port for access
+    targetPort: 3000  # Port where Grafana listens in pods
+#    nodePort: 31000  # Optional: Specify a specific NodePort (change if desired)
+#kubectl apply -f nodeport-grafana.yaml && kk get svc |grep -v node
 ```
+that Grafana is ready to visualize metrics from your specific namespace without any manual setup steps.
 
-In this configuration:
-- `selector.matchLabels` specifies that Prometheus should monitor services with the label `monitor: 'true'`.
-- `namespaceSelector.matchNames` specifies the namespace to monitor (`target-namespace`).
-- `endpoints` defines how Prometheus should scrape the metrics.
-
-Apply this `ServiceMonitor`:
-
-```sh
-kubectl apply -f servicemonitor.yaml
-```
-
-### Step 6: Label Services in the Target Namespace
-
-Label the services in the `target-namespace` that you want Prometheus to monitor:
-
-```sh
-kubectl label service your-service monitor=true -n target-namespace
-```
-
-### Step 7: Install Grafana
-
-Use Helm to install Grafana in the `monitoring` namespace:
-
-```sh
-helm install grafana grafana/grafana --namespace monitoring
-```
-
-### Step 8: Access Grafana
-
-1. **Get the Grafana Admin Password**:
-
-   ```sh
-   kubectl get secret --namespace monitoring grafana -o jsonpath="{.data.admin-password}" | base64 --decode ; echo
-   ```
-
-2. **Port-forward to access Grafana UI**:
-
-   ```sh
-   kubectl port-forward --namespace monitoring svc/grafana 3000:80
-   ```
+--- 
+### Manually if getting syntax errors at grafana helm upgrade:
 
    Access Grafana by opening your browser and navigating to `http://localhost:3000`. Log in with the username `admin` and the password retrieved above.
 
 ### Step 9: Configure Prometheus as a Data Source in Grafana
 
 1. In Grafana, go to **Configuration** > **Data Sources**.
-2. Click **Add data source** and select **Prometheus**.
+2. Click **Add data source** and select **prometheus**. (note the lowercase p that is also required in the json for the dashboard, for datasource: "prometheus")
 3. Set the URL to `http://prometheus-operated.monitoring.svc.cluster.local:9090`.
 4. Click **Save & Test** to verify the configuration.
 
