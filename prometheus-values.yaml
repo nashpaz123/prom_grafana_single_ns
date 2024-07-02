@@ -1,0 +1,22 @@
+server:
+  global:
+    scrape_interval: 15s
+  persistentVolume:
+    enabled: false
+
+serviceAccounts:
+  server:
+    create: true
+    name: "prometheus-server-{{ .Values.namespace }}"
+
+prometheus:
+  prometheusSpec:
+    serviceMonitorSelector:
+      matchLabels:
+        prometheus: "{{ .Values.namespace }}"
+    serviceMonitorNamespaceSelector:
+      matchNames:
+        - "{{ .Values.namespace }}"
+
+rbac:
+  create: true
