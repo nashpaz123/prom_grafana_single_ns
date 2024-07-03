@@ -10,12 +10,13 @@ Remember to adjust resource limits, persistence, and security settings according
 
 Here's the short process:
 
-1. Clone this repo, Enter the namespace var, Create the namespace:
+1. Clone this repo, go into the folder, Enter the namespace var, Create the namespace:
 
 ```bash
 git clone https://github.com/nashpaz123/prom_grafana_single_ns.git
+cd prom_grafana_single_ns
 export NAMESPACE=your-target-namespace
-kubectl create namespace $NAMESPACE
+kubectl create namespace $NAMESPACE #if it doesn't exist already
 ```
 
 2. Install Prometheus:
